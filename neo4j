@@ -1,0 +1,120 @@
+"""目标：从mysql数据库中调取数据存储到neo4j节点中
+分解：
+1、调取MySQL中所有带Cyp酶字样的数据
+2、通过列表去重/使用MERGE
+3、建立neo4j节点
+4、读取Mysql中关于CYP酶的增加、减少或者抑制等字样
+5、在neo4j中match然后create 关系
+
+"""
+import re
+from py2neo import Graph,Node,Relationship,NodeMatcher
+import pymysql
+db = pymysql.connect("localhost","root","119Cxy119" ,"medicine")
+graph = Graph(url='http://localhost:7474',username='neo4j',password='119cxy119')
+matcher=NodeMatcher(graph)
+cur=db.cursor()
+listmed = [] #这其中不能有cyp字样的
+med1=""
+med2=""
+enzyme=[]
+#要去除str的空格
+up="增加"
+down="抑制"
+enzymenow=""
+#第一步：调取MySQL中所有带Cyp酶字样的数据
+def getmedname():
+    sql1="""select med1 FROM med_rela
+    where rela REGEXP '[cypCYP]+';"""
+    try:
+        cur.execute(sql1)
+        results1=cur.fetchall()
+    except:
+        print("Error: unable to fecth data")
+    for n in results1:
+        for z in n:
+            z=z.lower()
+            if ("cyp" not in z) and (z not in listmed):
+                listmed.append(z)
+def extract(str,n):
+    meddic = {}
+    global med1
+    for i in listmed:
+        m = str.find(i)
+        if m > 0:
+            meddic[i] = m
+    if len(meddic)>0:
+        meddic=sorted(meddic.items(), key=lambda kv: (kv[1], kv[0]))
+        med1=meddic[0][0]
+    else:
+        med1={}
+    s=str.lower()
+    global enzymenow
+    try:
+        enzymenow=re.search("(cyp)+[a-z0-9]*",s).group()
+    except:
+        enzymenow=""
+    if (enzymenow not in enzyme) and (enzymenow!=""):
+        enzyme.append(enzymenow)
+    if s.find(down):
+        return 0
+    elif s.find(up):
+        return 1
+    else:
+        return 2
+def getstr1():
+    n=0
+    sql="""select rela FROM med_rela
+    where rela REGEXP '[cypCYP]+';"""
+    try:
+        cur.execute(sql)
+        results=cur.fetchall()
+    except:
+        print("Error: unable to fecth data")
+    for i in results:
+        extract(i[0],n)
+def getstr():
+    n=0
+    global med2
+    sql="""select * FROM med_rela
+    where rela REGEXP '[cypCYP]+';"""
+    try:
+        cur.execute(sql)
+        results=cur.fetchall()
+    except:
+        print("Error: unable to fecth data")
+    for i in results:
+        m=extract(i[3],n)
+        # print(results)
+        if med1!=i[1]:
+            med2=i[1]
+        else:
+            med2=i[2]
+        if m == 0 and len(med1)!=0 and enzymenow!="":
+            rel=Relationship(graph.nodes.match("Med", name=med1).first(), "down", graph.nodes.match("Enz", name=enzymenow).first())
+            graph.create(rel)
+            if not graph.nodes.match("Med", name=med2): #如果没有节点就创建节点
+                graph.create(Node("Med",name=med2))
+            rel2=Relationship(graph.nodes.match("Med", name=med2).first(), "need", graph.nodes.match("Enz", name=enzymenow).first())
+            graph.create(rel2)
+        elif m==1 and len(med1)!=0 and enzymenow!="":
+            graph.create(Relationship(graph.nodes.match("Med",name=med1).first(),"up",graph.nodes.match("Enz",name=enzymenow).first()))
+            if not graph.nodes.match("Med", name=med2):
+                graph.create(Node("Med",name=med2))
+            graph.create(Relationship(graph.nodes.match("Med", name=med2).first(),"not need",graph.nodes.match("Enz", name=enzymenow).first()))
+        n+=1
+#建立neo4j的节点
+def buildnode():
+    for i in listmed:
+        graph.create(Node('Med', name=i))
+    for i in range(len(enzyme)):
+        graph.create(Node('Enz', name=enzyme[i]))
+
+getmedname()
+getstr1()
+buildnode()
+getstr()
+print(listmed)
+print(matcher.match("Med",name="氟西汀"))
+
+
