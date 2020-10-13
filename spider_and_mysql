@@ -1,0 +1,88 @@
+from selenium import webdriver
+import time
+import re
+import pymysql
+import os
+mednames=["右美沙芬"]
+db = pymysql.connect("localhost","root","119Cxy119" ,"medicine")
+cur=db.cursor()
+
+
+options = webdriver.FirefoxOptions()
+options.add_argument('-headless')
+# a=open("右美沙芬3.txt","w")
+driver=webdriver.Firefox(firefox_options=options)
+driver.get("https://db.yaozh.com/interaction")
+
+#获得查询药物之后的网页
+def search_web(namestr):
+    driver.find_element_by_css_selector("input[name='interactdrugname']").clear()
+    driver.find_element_by_css_selector("input[name='interactdrugname']").send_keys("%s"%namestr)
+    driver.find_element_by_css_selector("button[type='submit']").click()
+    time.sleep(2)
+#已查询内容
+a=open("name.txt","r",encoding="utf-8")
+n=""
+for i in a:
+    n+=i
+n=n.replace(" ","")
+n=n.replace("\n"," ")
+n=n.replace("|", "")
+pastmed=n.split(" ")
+a.close()
+mednames=pastmed.copy()
+# def path(med):
+#     global a
+#     a.close()
+#     a=open("%s.txt"%med,"w",encoding='utf-8')
+# print(driver.find_element_by_xpath("/html/body/div[6]/div[5]/div/div[2]/table/tbody/tr[1]/td[1]").text)
+
+
+def getcontent():
+    for g in range(len(driver.find_elements_by_css_selector("body > div.main > div.tr.offset-top.pagination > a"))-1): #页面数
+        for i in range(len(driver.find_elements_by_xpath("/html/body/div[6]/div[5]/div/div[2]/table/tbody/tr"))): #遍历该页的所有行
+            m=driver.find_element_by_xpath("/html/body/div[6]/div[5]/div/div[2]/table/tbody/tr[%d+1]/th"%i).text
+            n=driver.find_element_by_xpath("/html/body/div[6]/div[5]/div/div[2]/table/tbody/tr[%d+1]/td[1]"%i).text
+            z=driver.find_element_by_xpath("/html/body/div[6]/div[5]/div/div[2]/table/tbody/tr[%d+1]/td[2]"%i).text
+
+            # a.write(m+" "+n+" "+z+" "+"\n")
+            #写入数据库
+            sql = """INSERT INTO med_rela(med1,med2,rela)
+                    VALUES 
+                    ("%s","%s","%s")""" % (m, n, z)
+            try:
+                cur.execute(sql)
+                db.commit()
+            except:
+                db.rollback()
+            #药名进入列表
+            if m not in mednames: #还要保证它是纯汉字
+                if re.match("^\w+$",m) != None:
+                    mednames.append(m)
+            if n not in mednames:
+                if re.match("^\w+$", n) != None:
+                    mednames.append(n)
+        # print(len(driver.find_elements_by_css_selector("body > div.main > div.tr.offset-top.pagination > a"))-1)
+        try:
+            newlink = driver.find_element_by_css_selector("a.page:nth-child(%d)"%(g+3)).get_attribute("href")
+            driver.get(newlink)
+        except:
+            print("finish")
+        #
+        driver.get(newlink)
+        time.sleep(3)
+
+    # a.close()
+
+
+for k in mednames:
+    if k not in pastmed:
+        # path(k)
+        search_web(k)
+        getcontent()
+        print("%s finish"%k)
+
+cur.close()
+db.close()
+# a.close()
+driver.quit()
